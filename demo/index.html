@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>stumble — letter wobble demo</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0c0a12;
+    --fg: #f4efe6;
+    --accent: #e4653a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    gap: 2.5rem;
+    padding: 2rem;
+    text-align: center;
+  }
+  h1 {
+    font-size: clamp(3rem, 12vw, 9rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1;
+  }
+  #headline span {
+    will-change: transform;
+  }
+  p.sub {
+    margin: 0;
+    max-width: 34rem;
+    opacity: 0.7;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  button {
+    font: inherit;
+    font-weight: 600;
+    padding: 0.7rem 1.4rem;
+    border-radius: 999px;
+    border: 1px solid var(--accent);
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  button:hover { background: rgba(228, 101, 58, 0.15); }
+  button[aria-pressed="false"] { opacity: 0.6; }
+  code {
+    background: rgba(255,255,255,0.08);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+</style>
+</head>
+<body>
+  <h1 id="headline">SUNSET LOGIC</h1>
+  <p class="sub">
+    Every letter wobbles with the same excursion magnitude — equal energy,
+    different dance. Toggle to compare against rest, or check
+    <code>document.getAnimations()</code> in devtools: each running
+    animation targets a plain <code>&lt;span&gt;</code>, never an SVG
+    element.
+  </p>
+  <button id="toggle" type="button" aria-pressed="true">Stop wobble</button>
+
+  <script type="module">
+    import { stumble } from '../stumble.js';
+
+    const headline = document.getElementById('headline');
+    const toggle = document.getElementById('toggle');
+
+    const controller = stumble(headline, {
+      amplitude: 3,
+      rotate: 0.6,
+    });
+
+    let active = true;
+    toggle.addEventListener('click', () => {
+      active = !active;
+      if (active) {
+        controller.start();
+        toggle.textContent = 'Stop wobble';
+      } else {
+        controller.stop();
+        toggle.textContent = 'Start wobble';
+      }
+      toggle.setAttribute('aria-pressed', String(active));
+    });
+  </script>
+</body>
+</html>
