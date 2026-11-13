@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>stumble tests</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, Menlo, monospace; margin: 2rem; }
+  .fail { color: #c22; }
+</style>
+</head>
+<body>
+<pre id="results">running…</pre>
+<script type="module">
+  import { run } from './suite.js';
+
+  const results = await run();
+  const failed = results.filter((r) => !r.pass).length;
+  document.getElementById('results').innerHTML = results
+    .map((r) => `<span class="${r.pass ? '' : 'fail'}">${r.pass ? 'ok  ' : 'FAIL'} ${r.name}</span>`)
+    .join('\n') + `\n\n${results.length - failed}/${results.length} passed`;
+</script>
+</body>
+</html>

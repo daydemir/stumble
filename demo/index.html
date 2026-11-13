@@ -3,48 +3,64 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>stumble — letter wobble demo</title>
+<title>stumble demo</title>
 <style>
   :root {
     color-scheme: dark;
     --bg: #0c0a12;
     --fg: #f4efe6;
+    --dim: #9a93a3;
+    --line: #26212f;
     --accent: #e4653a;
   }
   * { box-sizing: border-box; }
-  html, body {
+  body {
     margin: 0;
-    min-height: 100%;
+    min-height: 100vh;
     background: var(--bg);
     color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  }
-  body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    min-height: 100vh;
     gap: 2.5rem;
-    padding: 2rem;
+    padding: 4rem 1rem;
     text-align: center;
   }
   h1 {
-    font-size: clamp(3rem, 12vw, 9rem);
+    margin: 0;
+    font-size: clamp(3rem, 14vw, 9rem);
     font-weight: 800;
     letter-spacing: -0.02em;
-    margin: 0;
     line-height: 1;
   }
-  #headline span {
-    will-change: transform;
-  }
-  p.sub {
+  p {
     margin: 0;
-    max-width: 34rem;
-    opacity: 0.7;
-    font-size: 1rem;
+    max-width: 36rem;
+    color: var(--dim);
     line-height: 1.5;
+  }
+  .grid {
+    width: min(64rem, 100%);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
+    gap: 1rem;
+  }
+  .cell {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 2rem 1rem 1.25rem;
+    display: grid;
+    gap: 1.25rem;
+  }
+  .cell h2 {
+    margin: 0;
+    font-size: clamp(2rem, 6vw, 3rem);
+    font-weight: 700;
+  }
+  code {
+    font: 0.8rem/1.5 ui-monospace, Menlo, monospace;
+    color: var(--dim);
   }
   button {
     font: inherit;
@@ -57,47 +73,58 @@
     cursor: pointer;
   }
   button:hover { background: rgba(228, 101, 58, 0.15); }
-  button[aria-pressed="false"] { opacity: 0.6; }
-  code {
-    background: rgba(255,255,255,0.08);
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    font-size: 0.9em;
+  .reduced { display: none; color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) {
+    .reduced { display: block; }
   }
 </style>
 </head>
 <body>
-  <h1 id="headline">SUNSET LOGIC</h1>
-  <p class="sub">
-    Every letter wobbles with the same excursion magnitude — equal energy,
-    different dance. Toggle to compare against rest, or check
-    <code>document.getAnimations()</code> in devtools: each running
-    animation targets a plain <code>&lt;span&gt;</code>, never an SVG
-    element.
+  <h1 data-stumble>STUMBLE</h1>
+  <p>
+    Every letter drifts with the same excursion magnitude, in its own
+    direction. The headline uses the default options. Select it and copy:
+    it's still one string. In devtools, <code>document.getAnimations()</code> shows one animation per
+    letter, each on a plain <code>&lt;span&gt;</code>.
   </p>
-  <button id="toggle" type="button" aria-pressed="true">Stop wobble</button>
+  <p class="reduced">
+    Reduce motion is on, so everything is still. Turn it off in your system
+    settings and the letters start moving without a reload.
+  </p>
+
+  <div class="grid">
+    <div class="cell">
+      <h2 data-stumble='{"amplitude": 6}'>DRIFT</h2>
+      <code>amplitude: 6</code>
+    </div>
+    <div class="cell">
+      <h2 data-stumble='{"amplitude": {"x": 0.5, "y": 4}}'>DRIFT</h2>
+      <code>amplitude: { x: 0.5, y: 4 }</code>
+    </div>
+    <div class="cell">
+      <h2 data-stumble='{"rotate": 4}'>DRIFT</h2>
+      <code>rotate: 4</code>
+    </div>
+    <div class="cell">
+      <h2 data-stumble='{"durationRange": [0.6, 0.8], "delayRange": [0, 0.3]}'>DRIFT</h2>
+      <code>durationRange: [0.6, 0.8]</code>
+    </div>
+  </div>
+
+  <button id="toggle" type="button" aria-pressed="true">Stop</button>
 
   <script type="module">
     import { stumble } from '../stumble.js';
 
-    const headline = document.getElementById('headline');
+    const controllers = [...document.querySelectorAll('[data-stumble]')].map((el) =>
+      stumble(el, JSON.parse(el.dataset.stumble || '{}')),
+    );
+
     const toggle = document.getElementById('toggle');
-
-    const controller = stumble(headline, {
-      amplitude: 3,
-      rotate: 0.6,
-    });
-
-    let active = true;
     toggle.addEventListener('click', () => {
-      active = !active;
-      if (active) {
-        controller.start();
-        toggle.textContent = 'Stop wobble';
-      } else {
-        controller.stop();
-        toggle.textContent = 'Start wobble';
-      }
+      const active = toggle.getAttribute('aria-pressed') !== 'true';
+      controllers.forEach((c) => (active ? c.start() : c.stop()));
+      toggle.textContent = active ? 'Stop' : 'Start';
       toggle.setAttribute('aria-pressed', String(active));
     });
   </script>

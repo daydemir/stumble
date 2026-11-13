@@ -1,256 +1,263 @@
 # stumble
 
-The per-letter wobble animation from [denizaydemir.com](https://denizaydemir.com)
-and the [Sunset Logic](https://sunsetlogic.com) hero, extracted into a
-standalone, zero-dependency library. Each letter drifts through a small
-random-looking pose cycle — a couple of pixels of translate, half a degree
-of rotate — that reads as a word breathing rather than a page glitching.
+Each letter of a word drifts on its own: a couple of pixels of translate and
+half a degree of rotate, on a slow randomized cycle, so a headline looks like
+it's breathing rather than glitching. It's the letter wobble from the headings
+on [denizaydemir.com](https://denizaydemir.com) and the
+[Sunset Logic](https://sunsetlogic.com) hero, pulled out into a standalone,
+zero-dependency library.
 
-It looks trivial. It is not: getting it to run on the compositor thread,
-at 60fps, on both Chromium and WebKit, without measurable main-thread cost,
-took several rounds of profiling against real engine behavior. This README
-exists so the next implementer doesn't have to rediscover any of it.
+The effect looks trivial, but making it run on the compositor thread at 60fps
+in both Chromium and WebKit, with almost no main-thread cost, took several
+rounds of profiling. The [engine lessons](#the-five-engine-lessons) below
+record what that turned up, so nobody has to rediscover it.
+
+- One ES module, no dependencies, no build step.
+- Web Animations API: after setup the browser runs the animation itself,
+  with no `requestAnimationFrame` loop and no per-frame JavaScript.
+- Every letter moves with the same energy. Only the direction is random.
+- Respects `prefers-reduced-motion`, and picks up changes to it while the
+  page is open.
+- Screen readers hear the word, not its letters, and selecting and copying
+  the text still gives you the original string.
+
+## Demo
+
+```sh
+git clone https://github.com/daydemir/stumble && cd stumble
+python3 -m http.server 8000
+open http://localhost:8000/demo/
+```
+
+The demo shows a display headline and a grid of option variations
+(amplitude, an anisotropic ellipse, rotation, a fast cycle) with a stop/start
+toggle. ES modules don't load from `file://`, so serve the repo with any
+static server.
 
 ## Install
 
-No package, no build step. Copy `stumble.js` into your project and import
-it as an ES module:
+Copy `stumble.js` into your project, or install it from GitHub:
 
-```html
-<script type="module">
-  import { stumble } from './stumble.js';
-</script>
+```sh
+npm install github:daydemir/stumble
 ```
+
+```js
+import { stumble } from 'stumble'; // or './stumble.js'
+```
+
+It needs `Intl.Segmenter` and the Web Animations API: Chrome 87+, Safari
+14.1+, Firefox 125+.
 
 ## Usage
 
-### Plain text — let stumble split the letters
+### Plain text
 
 ```js
 import { stumble } from './stumble.js';
 
-const controller = stumble(document.querySelector('h1'), {
-  amplitude: 2,     // px, radius of the pose ellipse (or {x, y})
-  rotate: 0.5,       // degrees, full rotation amplitude
-  durationRange: [3.2, 4.8],  // seconds, randomized per letter
-  delayRange: [0, 1.6],       // seconds, randomized per letter
-});
+const controller = stumble(document.querySelector('h1'));
 
-// controller.stop() / controller.start() / controller.destroy()
+controller.stop();    // letters snap back to rest
+controller.start();   // fresh random poses
+controller.destroy(); // stop, unsubscribe, restore the original DOM
 ```
 
-`stumble(el, opts)` replaces `el`'s text content with one `<span
-style="display:inline-block">` per non-space character (spaces stay as
-plain text nodes so wrapping and selection keep working), then animates
-each span. `controller.destroy()` restores the element's original
-`innerHTML`.
+`stumble(el, options)` replaces the element's text with one inline-block
+`<span>` per letter and animates each one:
 
-### Pre-split elements — e.g. a knockout mask-hole build
+- Letters are split by **grapheme cluster** (`Intl.Segmenter`), so `É`
+  written as `E` plus a combining accent, or an emoji sequence like 👩‍💻,
+  stays in one piece.
+- Each word is wrapped in a `white-space: nowrap` span, so a line never
+  breaks mid-word. Whitespace between words stays as plain text nodes.
+- The word wrappers are `aria-hidden`, and the element gets the text as its
+  `aria-label` (unless it already has one), so a screen reader announces
+  "SUNSET" instead of "S, U, N, S, E, T". `aria-label` is only reliably
+  announced on elements with a role, so use it on a heading or give the
+  element a role.
+- The letters are still real text nodes in document order, so selecting and
+  copying the heading gives you the original string.
+- Child markup is flattened to text while the effect is active.
+  `destroy()` puts the original child nodes, and any `aria-label`, back
+  exactly as they were.
 
-If your letters already exist as separate elements — for instance, HTML
-divs positioned over holes cut in an SVG mask, the way sunsetlogic.com's
-knockout hero works (see Lesson 2 below for why those wrapper divs have to
-be HTML, not SVG) — drive them directly:
+Call `destroy()` when you remove the element. Each controller holds a
+`prefers-reduced-motion` listener until then.
+
+### Pre-split elements
+
+If your letters already exist as separate elements, for example HTML
+wrappers positioned over holes cut in an SVG mask, animate them directly:
 
 ```js
 import { stumbleElements } from './stumble.js';
 
-const letters = document.querySelectorAll('.hero-letter');
-const controller = stumbleElements(letters, { amplitude: 2, rotate: 0.5 });
+const controller = stumbleElements(document.querySelectorAll('.hero-letter'), {
+  amplitude: 2,
+  rotate: 0.5,
+});
 ```
+
+Every element must be an `HTMLElement`. SVG elements throw a `TypeError`
+(see [lesson 2](#2-never-animate-a-transform-on-an-svg-element)).
 
 ### Options
 
 | Option | Default | Meaning |
 |---|---|---|
-| `amplitude` | `2` | Radius (px) of the ellipse each pose sits on. A number applies to both axes (circle); pass `{ x, y }` for an anisotropic ellipse. |
-| `rotate` | `0.5` | Rotation amplitude in degrees. Every pose gets ±this, never less. |
-| `durationRange` | `[3.2, 4.8]` | Seconds. Each letter's cycle duration is randomized once in this range. |
-| `delayRange` | `[0, 1.6]` | Seconds. Each letter's start delay is randomized once in this range, so letters don't move in lockstep. |
-| `active` | `true` | Start animating immediately. |
-| `respectReducedMotion` | `true` | Watch `prefers-reduced-motion: reduce` and cancel animations while it's set (see Lesson 5). |
+| `amplitude` | `2` | Radius in px of the ellipse every pose sits on. A number gives a circle. Pass `{ x, y }` for an ellipse. |
+| `rotate` | `0.5` | Rotation in degrees. Every pose gets exactly ±this. |
+| `durationRange` | `[3.2, 4.8]` | Seconds. Each letter's cycle length is picked once from this range. |
+| `delayRange` | `[0, 1.6]` | Seconds. Each letter's start delay is picked once from this range, so letters don't move in lockstep. |
+| `active` | `true` | Start animating immediately. With `false`, nothing moves until `start()`. |
+| `respectReducedMotion` | `true` | Cancel every animation while `prefers-reduced-motion: reduce` matches, and rebuild them when it stops matching. |
 
 ### Controller
 
-Both `stumble()` and `stumbleElements()` return:
+Both functions return:
 
 ```ts
 {
-  start(): void;    // (re)start animating
-  stop(): void;     // cancel animations, letters snap to rest
-  destroy(): void;  // stop() + release listeners; stumble() also restores original DOM
+  start(): void;   // animate, unless reduced motion is on and respected
+  stop(): void;    // cancel the animations; letters snap back to rest
+  destroy(): void; // stop and remove the media-query listener; stumble() also restores the DOM
 }
 ```
 
+The animation owns each letter's `transform`. To layer another offset on a
+letter, such as a scroll parallax, use the individual `translate` CSS
+property, which composes with `transform` instead of fighting it.
+
 ## The five engine lessons
 
-These came out of profiling the animation on the real Sunset Logic and
-denizaydemir.com pages across Chromium and WebKit. All five are encoded in
-`stumble.js` — this section is here so a future implementer who is tempted
-to "simplify" the animation shape understands what each piece is buying.
+These came from profiling the animation on the live Sunset Logic and
+denizaydemir.com pages in Chromium and WebKit. `stumble.js` follows all
+five. If you're tempted to "simplify" the animation's shape, read these
+first.
 
 ### 1. Equal-energy poses, not uniform-random ones
 
-Every letter gets the **same excursion magnitude**. A pose is chosen by
-picking a random *angle* on the amplitude ellipse (radius `amplitude`, or
-`(amplitude.x, amplitude.y)` if anisotropic) and a random *sign* for
-rotation at **full** rotation amplitude — never a random magnitude.
+Every letter gets the **same excursion magnitude**. A pose sits on the
+amplitude ellipse at a random *angle*, and its rotation is the **full**
+rotation amplitude with a random *sign*. The magnitude is never random.
 
-The bug this fixes isn't hypothetical: drawing each letter's translate
-distance from a uniform random range (instead of fixing the magnitude and
-randomizing only the angle) made later letters in a word visibly wobble
-harder than earlier ones, purely by chance clustering across a run. Deniz's
-read on it was immediate and specific: it looked like the word was
-*degrading* toward its end, like a typo forming. Equal energy — same
-magnitude, random direction — reads as a single consistent animation
-instead.
+An earlier version drew each offset from a uniform random range. By chance,
+later letters often ended up with bigger draws than earlier ones, and the
+word looked like it was *degrading* toward its end, like a typo forming.
+Fixing the magnitude and randomizing only the direction reads as one
+consistent animation.
 
 ```js
 function pose(amplitude, rotate) {
   const angle = Math.random() * Math.PI * 2;
-  const x = amplitude.x * Math.cos(angle);
-  const y = amplitude.y * Math.sin(angle);
-  const r = rotate * (Math.random() < 0.5 ? -1 : 1);
-  return [x, y, r];
+  const sign = Math.random() < 0.5 ? -1 : 1;
+  return [amplitude.x * Math.cos(angle), amplitude.y * Math.sin(angle), rotate * sign];
 }
 ```
 
-### 2. Never animate a transform on an SVG element — animate an HTML wrapper
+### 2. Never animate a transform on an SVG element
 
-Blink (Chromium) will not run a `transform` animation targeting an SVG
-element on the compositor thread — not even a root `<svg>`. It silently
-falls back to recomputing and repainting on the main thread, every single
-vsync, with no console warning and no visible functional difference until
-you profile it. Measured on the production page: the SVG-targeted version
-cost roughly 2100ms of main-thread busy time over a 6-second idle window;
-the identical animation retargeted onto a plain HTML `<div>` wrapping the
-SVG cost about 93ms.
+Blink won't run a `transform` animation on an SVG element on the
+compositor thread, not even on a root `<svg>`. It quietly falls back to
+recomputing and repainting on the main thread every frame. There's no
+console warning and no visible difference until you profile. On the
+production page, the SVG-targeted version cost about 2100ms of main-thread
+time over a 6-second idle window. The same animation on a plain HTML
+`<div>` wrapping the SVG cost about 93ms.
 
-The fix is structural: wrap whatever visually moves (an SVG letter patch,
-a masked hole, anything) in a plain HTML element, and animate *that*
-element's `transform`. Never call `.animate()` (or apply a CSS transform
-transition/animation) directly on an `<svg>`, a `<text>`, a `<g>`, or any
-other SVG-namespace element if you want the compositor fast path.
+So wrap whatever moves (an SVG letter, a masked hole) in a plain HTML
+element and animate that element's `transform`. That's why
+`stumbleElements()` only accepts HTML elements.
 
-This is why `stumbleElements()`'s contract is "pass HTML elements" — if
-your letters are conceptually SVG (e.g. mask holes), the caller is
-responsible for giving each one an HTML div wrapper positioned on top, and
-passing *those* divs in.
+### 3. A local `<mask>` or painted `<text>` inside the animated subtree also kills the fast path
 
-### 3. A local `<mask>`/`<defs>`, or painted `<text>`, inside the animated subtree also kills the fast path
+Two more ways to lose the compositor fast path, even with the animation on
+an HTML element:
 
-Two more ways to accidentally disqualify the same compositor fast path,
-even once you've correctly moved the animation onto an HTML element:
+- **A `<mask>` (or `<defs>` holding one) defined inside the animated
+  subtree.** Blink repaints every frame even though the mask never
+  changes. Define the mask in a separate sibling `<svg>` (say
+  `width="0" height="0"`) and reference it with `mask="url(#id)"`. Mask
+  references resolve by document-wide ID, so this costs nothing. Getting it
+  wrong took Paint count from 7 to 2527, and Layout from 0 to 361, over the
+  same 6-second idle window.
+- **`<text>` painted inside the animated subtree.** It causes the same
+  repaint-every-frame regression. If a moving patch needs letterforms (for
+  a hover state, say), insert them only while they're needed.
 
-- If that HTML element's subtree contains an SVG `<mask>` (or `<defs>`
-  holding one) **scoped locally inside it**, Blink still falls back to a
-  full repaint every frame — even though the mask content is 100% static
-  and only an ancestor's transform is changing. The fix: define the
-  `<mask>` in an external sibling `<svg>` (e.g. `width="0" height="0"`,
-  positioned off to the side) and reference it from inside the animated
-  subtree the normal way, `mask="url(#id)"` — SVG mask references resolve
-  by document-wide ID lookup, so this costs nothing at render time and
-  everything at compositor-eligibility time. Measured effect of getting
-  this wrong: Paint count went from 7 to 2527 and Layout from 0 to 361
-  over the same 6-second idle window.
+The rule: keep everything under the element you `.animate()` free of local
+mask definitions and painted `<text>`. Static geometry, references to
+external masks, and raster content like `<image>` are fine.
 
-- Independently of masking, any `<text>` **painted directly inside** the
-  animated subtree disqualifies the same fast path too — verified as the
-  identical paint-every-frame regression, with the mask hoisted out
-  correctly and the only remaining difference being a `<text>` element
-  physically inside the moving element. If you need letterforms inside a
-  moving patch (e.g. for a hover state), build and insert that content
-  lazily — only while it's actually needed — rather than baking it into
-  the animated subtree at construction time.
+### 4. WebKit's canvas ink metrics can lie for webfonts
 
-Net rule: keep the *entire* subtree of whatever element you `.animate()`
-free of local `<mask>`/`<defs>` definitions and free of painted `<text>`.
-Static geometry, references to externally-defined masks, and raster
-content (e.g. `<image>`) are fine; local mask definitions and live text
-painting are not.
+This one matters only if you build a per-letter mask layer like the Sunset
+Logic hero. If you measure glyph ink extents with
+`CanvasRenderingContext2D.measureText()` (`actualBoundingBoxLeft` and
+`actualBoundingBoxRight`) to find where it's safe to cut a per-letter cell,
+WebKit sometimes returns the **advance box** for webfonts instead of the
+ink box. The measured gap between letters then collapses to roughly the
+letter spacing. In production it showed up as a gap of `-0.00006`px between
+letters that visibly didn't touch.
 
-### 4. WebKit's canvas ink-metric APIs can lie for webfonts — have a pixel-scan fallback
+When the ink box equals the advance box, fall back to a pixel scan: draw
+the glyph on an offscreen canvas, read it back with `getImageData`, and
+scan the alpha columns for the real edges. Cache the result per glyph and
+font.
 
-If your implementation measures per-glyph ink extents via
-`CanvasRenderingContext2D.measureText()`'s `actualBoundingBoxLeft` /
-`actualBoundingBoxRight` (for example, to figure out where it's safe to cut
-a per-letter clipping cell without slicing through a letterform), don't
-trust those numbers unconditionally on WebKit. For some webfonts, WebKit
-returns the **advance box** instead of the actual ink box — left edge at
-0, right edge at the character's advance width — which collapses your
-measured "ink gap" between letters down to essentially the letter-spacing
-value. On a production measurement this showed up as a gap of
-`-0.00006`px, i.e. WebKit reported letters as touching or overlapping when
-they visibly were not.
+### 5. The timing recipe, and why reduced motion cancels instead of pausing
 
-Detect the degenerate case (ink box ≈ advance box) and fall back to an
-actual pixel scan: draw the glyph to an offscreen canvas at a known
-transform, read back `getImageData`, and scan alpha columns for the true
-left/right ink edges. Cache per glyph+font-string; it's a one-time cost
-per unique character.
+Every letter follows the same shape:
 
-This library doesn't include per-glyph ink measurement (it animates
-whatever elements you give it — see Lessons 2 and 3 for what those
-elements need to look like), but if you build the mask-hole-cutting layer
-described in the note on sunsetlogic.com below, budget for this.
-
-### 5. The timing recipe, and why reduced motion cancels instead of pauses
-
-The shape every letter's animation follows:
-
-- **4 waypoints**: rest → pose 1 → pose 2 → pose 3 → rest, each segment
+- **Five keyframes**: rest, pose 1, pose 2, pose 3, rest, each segment
   eased `ease-in-out`.
-- **Duration**: 3.2–4.8s, randomized per letter.
-- **Delay**: 0–1.6s, randomized per letter, so letters don't move in
-  lockstep even with identical durations.
-- **Amplitude**: ~±2px translate (the pose ellipse radius), ±0.5deg
-  rotate — see Lesson 1 for how poses are actually chosen on that ellipse.
-- **Iteration**: infinite.
-- **`prefers-reduced-motion: reduce`**: **cancel** every animation, don't
-  pause it. This library uses WAAPI's `fill: 'none'` (the default), which
-  means a *cancelled* animation snaps its element straight back to the
-  untransformed rest state. Pausing instead would freeze each letter
-  wherever it happened to be mid-drift — which reads as a broken layout, a
-  typo, not as a calm resting word. When reduced motion is turned back
-  off, animations are rebuilt fresh (new random poses), not resumed from
-  wherever they were cancelled.
+- **Duration** 3.2–4.8s and **delay** 0–1.6s, picked per letter, so
+  letters never move in lockstep.
+- **Amplitude** about ±2px of translate and ±0.5deg of rotate, chosen as in
+  lesson 1.
+- **Iterations**: infinite.
+- **Reduced motion cancels every animation instead of pausing it.** With
+  `fill: 'none'`, a cancelled animation snaps its letter straight back to
+  rest. A paused one would freeze each letter mid-drift, which looks like
+  a broken layout rather than a calm word. When reduced motion turns off
+  again, the animations are rebuilt with new poses instead of resumed.
 
-If you're implementing a fallback for an engine or context where WAAPI
-infinite animations aren't viable (the original site had to do this for
-engines that couldn't support the compositor-patch architecture at all),
-reproduce this same shape with a manual rAF clock: continuous time from
-the raw timestamp (not a quantized tick grid, so nothing can drift or need
-resnapping after a stall), the same four-waypoint/ease-in-out interpolation,
-and the same cancel-on-reduce/rebuild-on-un-reduce behavior.
+If you ever need a fallback for an engine where infinite WAAPI animations
+aren't viable, reproduce this shape with a `requestAnimationFrame` clock:
+continuous time from the frame timestamp (not a tick grid that can drift
+after a stall), the same five-keyframe ease-in-out interpolation, and the
+same cancel-and-rebuild behavior.
 
-## Note: sunsetlogic.com's knockout hero
+## Where it came from
 
-The Sunset Logic homepage hero renders its headline as a **knockout** —
-the letters are literal holes cut in an opaque plate (an SVG mask), with a
-lower layer (sky, gradient, video) showing through. That hero uses this
-exact same wobble architecture: each letter is cut into its own small
-mask-and-plate patch (not one mask for the whole word — see Lesson 3 on
-why per-letter patches, each rasterised once, matter), wrapped in a plain
-HTML `.mover` div, and it's that div's `transform` that
-`stumbleElements()`-equivalent code animates (Lesson 2). The mask itself
-never moves and is never re-rasterised after the initial build; only the
-HTML wrapper's compositor layer moves.
+The effect started as the per-letter drift on the headings of
+[denizaydemir.com](https://denizaydemir.com). The
+[Sunset Logic](https://sunsetlogic.com) homepage hero then pushed it
+further: the headline there is a **knockout**, with the letters cut as
+holes in an opaque plate so the scene behind shows through. Each letter is
+its own small mask-and-plate patch inside a plain HTML wrapper, and that
+wrapper is what wobbles. The mask itself never moves and is never
+re-rasterized.
 
-If you're porting the knockout treatment elsewhere, the split of concerns
-is: your own code owns cutting per-letter mask patches and positioning
-their HTML wrapper divs (including the ink-measurement fallback in Lesson
-4 for cutting safe cell boundaries); this library owns making each
-wrapper div wobble correctly once it exists. Call `stumbleElements()` with
-the wrapper divs.
+If you port the knockout treatment, your code owns cutting the per-letter
+patches and positioning their HTML wrappers (lessons 3 and 4). This library
+owns making each wrapper wobble: pass the wrappers to `stumbleElements()`.
 
-## Files
+## Tests
 
-- `stumble.js` — the library. Exports `stumble(el, opts)` and
-  `stumbleElements(els, opts)`.
-- `demo/index.html` — self-contained demo, no build step. Serve the repo
-  root with any static file server and open `demo/index.html`.
-- `LICENSE` — MIT.
+```sh
+npm test
+```
+
+No dependencies here either. `test/run.mjs` serves the repo on a local port,
+drives headless Chrome over the DevTools protocol with Node built-ins (Node
+22+), and runs `test/suite.js` three times in one page: with motion
+allowed, with `prefers-reduced-motion: reduce` emulated, and with it cleared
+again, so live changes are tested in both directions. Set `CHROME_PATH` if
+Chrome isn't in the default location. To run the suite in any other
+browser, serve the repo and open `test/index.html`.
 
 ## License
 
-MIT, © Sunset Logic. See `LICENSE`.
+[MIT](LICENSE)

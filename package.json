@@ -1,0 +1,14 @@
+{
+  "name": "stumble",
+  "version": "1.0.0",
+  "description": "Equal-energy per-letter wobble animation. Zero dependencies, compositor-safe, reduced-motion safe.",
+  "type": "module",
+  "exports": "./stumble.js",
+  "files": ["stumble.js"],
+  "scripts": {
+    "test": "node test/run.mjs"
+  },
+  "repository": "github:daydemir/stumble",
+  "license": "MIT",
+  "private": true
+}
